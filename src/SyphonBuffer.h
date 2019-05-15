@@ -1,7 +1,11 @@
 #ifndef _SYPHON_BUFFER_H_
 #define _SYPHON_BUFFER_H_
 #import <Syphon/Syphon.h>
-@interface SyphonBufferController : NSObject
+
+@class LineReader;
+
+@interface SyphonBufferController : NSObject <NSStreamDelegate>
+@property (retain) LineReader *commandReader;
 -(id)init;
 -(void)onServerNotification:(NSNotification *)aNotification;
 -(void)run;
