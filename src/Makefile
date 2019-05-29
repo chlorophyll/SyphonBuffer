@@ -4,7 +4,7 @@ CFLAGS=-Wno-deprecated-declarations
 
 .PHONY: clean
 
-SyphonBuffer: SyphonBuffer.m LineReader.m
+SyphonBuffer: SyphonDispatcher.m LineReader.m BufferClient.m
 	clang $(CFLAGS) $(FRAMEWORK_SEARCH_PATH) $(FRAMEWORKS) $^ -o $@
 
 clean:

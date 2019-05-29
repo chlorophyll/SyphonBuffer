@@ -1,10 +1,12 @@
-#import <Cocoa/Cocoa.h>
-#define GL_SILENCE_DEPRECATION
+#include "BufferClient.h"
+#include "SyphonDispatcher.h"
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <OpenGL/gl.h>
-#include "SyphonBuffer.h"
-#include "LineReader.h"
-
 #define NUM_PBOS 3
+#define MAX_FILENAME 24
+#define MAX_WIDTH 2048
+#define MAX_SIZE (MAX_WIDTH * MAX_WIDTH * 4)
 
 void _logError(NSString *str) {
     GLenum err;
@@ -15,26 +17,17 @@ void _logError(NSString *str) {
 
 #define logError(v)
 
-
-@implementation SyphonBufferController
+@implementation BufferClient
 SyphonClient* syClient;
 GLuint tex;
 GLuint fbo;
 GLuint pbos[NUM_PBOS];
+
 BOOL initialized = NO;
 int currentFrame = 0;
 NSTimeInterval fpsStart;
 NSUInteger fpsCount;
-NSOutputStream *outStream;
-
-
--(id)init {
-    id instance = [super init];
-    if (instance) {
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onServerNotification:) name:nil object:[SyphonServerDirectory sharedDirectory]];
-    }
-    return instance;
-}
+SyphonDispatcher *dispatcher;
 
 - (void)initBuffersForSize:(NSSize)size {
     if (initialized) {
@@ -59,7 +52,6 @@ NSOutputStream *outStream;
 
     GLsizei width = size.width;
     GLsizei height = size.height;
-    NSLog(@"size: %lu", (size_t)(width*height*4));
 
     // gen texture
     glEnable(GL_TEXTURE_RECTANGLE_ARB);
@@ -105,9 +97,6 @@ NSOutputStream *outStream;
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFBO);
     logError(@"restore glBindFramebuffer DRAW");
-
-
-
 
     // gen pbos
     // Save PBO state
@@ -245,8 +234,6 @@ NSOutputStream *outStream;
     glBindBuffer(GL_PIXEL_PACK_BUFFER, readPbo);
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
 
-    // This is a minimal setup of pixel storage - if anything else might have touched it
-    // be more explicit
     glPixelStorei(GL_PACK_ROW_LENGTH, width);
 
     // Start the download to PBO
@@ -270,126 +257,62 @@ NSOutputStream *outStream;
 
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
-
-
     currentFrame++;
 }
 
--(void)createClientForServer:(NSDictionary *)serverDescription {
-    NSOpenGLPixelFormatAttribute  attributes[] = {
-        NSOpenGLPFANoRecovery,
-        NSOpenGLPFAAccelerated,
-        NSOpenGLPFADepthSize, 24,
-        (NSOpenGLPixelFormatAttribute) 0
-    };
-    NSOpenGLPixelFormat *pixFormat = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
-    NSOpenGLContext *context = [[NSOpenGLContext alloc] initWithFormat:pixFormat shareContext:nil];
+-(id)initWithServer:(NSDictionary *)serverDescription context:(NSOpenGLContext *)context andDispatcher:(SyphonDispatcher *)d {
+    id instance = [super init];
+    if (instance == nil) {
+        return nil;
+    }
+
+    dispatcher = d;
+
     [context makeCurrentContext];
     fpsStart = [NSDate timeIntervalSinceReferenceDate];
     fpsCount = 0;
+
+    NSArray *parts = [serverDescription[SyphonServerDescriptionUUIDKey] componentsSeparatedByString:@"."];
+
+    NSString *last = [parts lastObject];
+
+    NSString *uuid = [last stringByReplacingOccurrencesOfString:@"-" withString:@""];
+
+    NSString *truncated = [uuid substringFromIndex:([uuid length]-MAX_FILENAME)];
+
+    const char *uuidStr = [truncated UTF8String];
+
+    int fd = shm_open(uuidStr, O_RDWR, 0600);
+
+    if (fd < 0) {
+        return nil;
+    }
+
+    uint8_t *pixels = mmap(NULL, MAX_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+    shm_unlink(uuidStr);
 
     syClient = [[SyphonClient alloc]
                 initWithServerDescription:serverDescription
                 context:[context CGLContextObj]
                 options:nil newFrameHandler:^(SyphonClient *client)
     {
-        fpsCount++;
-        float elapsed = [NSDate timeIntervalSinceReferenceDate] - fpsStart;
-        if (elapsed > 1.0)
-        {
-            float FPS = ceilf(fpsCount / elapsed);
-            NSLog(@"FPS: %0.1f", FPS);
-            fpsStart = [NSDate timeIntervalSinceReferenceDate];
-            fpsCount = 0;
-        }
         SyphonImage *image = [client newFrameImage];
+        [context makeCurrentContext];
         if (!initialized) {
             [self initBuffersForSize:image.textureSize];
         }
         size_t size = 4 * image.textureSize.width * image.textureSize.height;
-        uint8_t pixels[size];
         [self copyImage:image toByteBuffer:pixels];
-        if (elapsed > 1.0) {
-            NSLog(@"first three bytes: %u %u %u", pixels[0], pixels[1], pixels[2]);
-        }
+
+        NSDictionary *data = @{
+            @"server": [dispatcher jsonForServer:serverDescription],
+             @"width": [NSNumber numberWithInt:image.textureSize.width],
+            @"height": [NSNumber numberWithInt:image.textureSize.height],
+        };
+        [dispatcher sendCommand:@"frame" withData:data];
     }];
-}
 
--(void)onServerNotification:(NSNotification *)aNotification {
-    NSLog(@"server notification %@", aNotification.name);
-
-    NSArray *servers = [[SyphonServerDirectory sharedDirectory] servers];
-    NSMutableArray *serverData = [NSMutableArray array];
-
-    for (NSDictionary *serverDescription in servers) {
-        //NSImage *icon = serverDescription[SyphonServerDescriptionIconKey];
-
-        //NSString *iconEncoded = nil;
-
-        //if (icon) {
-        //    NSBitmapImageRep *imageRep = [[NSBitmapImageRep alloc] initWithData:[icon TIFFRepresentation]];
-        //    NSData *data = [imageRep representationUsingType:NSPNGFileType properties:@{
-        //                         @"NSImageCompressionFactor": @"1.0"
-        //    }];
-        //    iconEncoded = [data base64EncodedStringWithOptions:0];
-        //}
-
-
-        [serverData addObject:@{
-            @"uuid": serverDescription[SyphonServerDescriptionUUIDKey],
-            @"name": serverDescription[SyphonServerDescriptionNameKey],
-         @"appName": serverDescription[SyphonServerDescriptionAppNameKey],
-        }];
-    }
-
-    [self sendCommand:@"updateServers" withData:serverData];
-    //if ([servers count] == 1) {
-    //    NSDictionary *serverDescription = [servers objectAtIndex:0];
-    //    [self createClientForServer:serverDescription];
-    //}
-}
-
--(void)sendCommand:(NSString *)command withData:(id)data
-{
-    NSDictionary *dict = @{
-        @"command": command,
-        @"data": data,
-    };
-
-    uint8_t b = '\n';
-
-    [NSJSONSerialization writeJSONObject:dict toStream:outStream options:0 error:nil];
-    [outStream write:&b maxLength:1];
-}
-
--(void)onCommand:(NSDictionary *)command
-{
-}
-
--(void)onLine:(NSString *)line orError:(NSError *)error
-{
-}
-
--(void)run {
-    outStream = [NSOutputStream  outputStreamToFileAtPath:@"/dev/stdout" append:YES];
-    [outStream setDelegate:self];
-    [outStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-    [outStream open];
-
-    self.commandReader = [[LineReader alloc] init];
-    [self.commandReader readLinesFromPath:@"/dev/stdin" withEncoding:NSUTF8StringEncoding usingBlock:^(NSString *line, NSError *error) {
-        [self onLine:line orError:error];
-    }];
-    [[NSRunLoop currentRunLoop] run];
+    return instance;
 }
 @end
-
-
-int main(int argc, char *argv[])
-{
-    @autoreleasepool {
-        SyphonBufferController *obj = [[SyphonBufferController alloc] init];
-        [obj run];
-    }
-    return 0;
-}
