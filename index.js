@@ -1,4 +1,5 @@
 const child_process = require('child_process');
+const path = require('path');
 const readline = require('readline');
 const shm = require('nodeshm');
 const mmap = require('mmap.js');
@@ -72,10 +73,15 @@ class SyphonRegistry extends EventEmitter {
         super();
         this.serversById = new Map();
         this.clientsByServerId = new Map();
+        this.onExit = this.cleanup.bind(this);
     }
 
     start() {
-        this.ipc = child_process.spawn('./SyphonBuffer');
+        process.on('exit', this.onExit);
+        process.on('SIGINT', this.onExit);
+        process.on('SIGTERM', this.onExit);
+        const syphonBufferPath = path.resolve(__dirname, 'native/bin/SyphonBuffer');
+        this.ipc = child_process.spawn(syphonBufferPath);
         this.interface = readline.createInterface({
             input: this.ipc.stdout,
         });
@@ -147,32 +153,7 @@ class SyphonRegistry extends EventEmitter {
 
 }
 
-const registry = new SyphonRegistry();
-
-registry.on('servers-updated', () => {
-    const servers = Array.from(registry.serversById.values());
-
-    if (servers.length === 1) {
-        registry.createClientForServerAsync(
-            servers[0],
-            (frame, width, height) => {
-                console.log(frame[0], frame[1], frame[2]);
-            }
-        ).then(client => {
-            console.log('connected');
-        });
-    }
-});
-
-
-
-function cleanExit() {
-    process.exit();
-}
-process.on('SIGINT', cleanExit);
-process.on('SIGTERM', cleanExit);
-
-process.on('exit', () => {
-    registry.cleanup();
-});
-registry.start();
+module.exports = {
+    SyphonClient,
+    SyphonRegistry,
+};

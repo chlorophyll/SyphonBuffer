@@ -1,11 +1,12 @@
-FRAMEWORK_SEARCH_PATH=-F../Frameworks
+FRAMEWORK_SEARCH_PATH=-F./Frameworks
 FRAMEWORKS=-framework OpenGL -framework Foundation -framework Cocoa -framework Syphon
 CFLAGS=-Wno-deprecated-declarations
 
 .PHONY: clean
 
-SyphonBuffer: SyphonDispatcher.m LineReader.m BufferClient.m
+bin/SyphonBuffer: SyphonDispatcher.m LineReader.m BufferClient.m
+	mkdir -p bin
 	clang $(CFLAGS) $(FRAMEWORK_SEARCH_PATH) $(FRAMEWORKS) $^ -o $@
 
 clean:
-	rm SyphonBuffer
+	rm bin/SyphonBuffer

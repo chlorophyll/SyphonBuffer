@@ -6,5 +6,8 @@
   "dependencies": {
     "mmap.js": "^1.0.3",
     "nodeshm": "https://github.com/chlorophyll/nodeshm.git"
+  },
+  "scripts": {
+    "install": "./install.sh"
   }
 }
