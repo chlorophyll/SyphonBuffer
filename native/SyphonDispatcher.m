@@ -42,6 +42,14 @@ NSMutableDictionary *clients;
     [clients setObject:cl forKey:uuid];
 }
 
+-(void)disconnectClientForServerUUID:(NSString *)uuid {
+    BufferClient *cl = [clients objectForKey:uuid];
+    if (cl != nil) {
+        [clients removeObjectForKey:uuid];
+    }
+    [cl cleanup];
+}
+
 -(NSDictionary *)jsonForServer:(NSDictionary *)serverDescription {
     return @{
         @"uuid": serverDescription[SyphonServerDescriptionUUIDKey],
@@ -106,6 +114,10 @@ NSMutableDictionary *clients;
             [self createClientForServer:serverDescription];
             [self sendCommand:@"clientCreated" withData:[self jsonForServer:serverDescription]];
         }
+    } else if ([command isEqualToString:@"disconnectClient"]) {
+        NSDictionary *d = (NSDictionary *)data;
+        NSString *uuid = d[@"uuid"];
+        [self disconnectClientForServerUUID:uuid];
     }
 }
 

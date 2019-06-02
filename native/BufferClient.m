@@ -18,10 +18,12 @@ void _logError(NSString *str) {
 #define logError(v)
 
 @implementation BufferClient
-SyphonClient* syClient;
+SyphonClient* syClient = nil;
 GLuint tex;
 GLuint fbo;
 GLuint pbos[NUM_PBOS];
+
+uint8_t *pixels = NULL;
 
 BOOL initialized = NO;
 int currentFrame = 0;
@@ -47,8 +49,6 @@ SyphonDispatcher *dispatcher;
     logError(@"GL_DRAW_FRAMEBUFFER_BINDING");
     glPushAttrib(GL_ALL_ATTRIB_BITS);
     logError(@"glPushAttrib");
-
-
 
     GLsizei width = size.width;
     GLsizei height = size.height;
@@ -260,6 +260,22 @@ SyphonDispatcher *dispatcher;
     currentFrame++;
 }
 
+-(void)cleanup {
+    if (syClient != nil) {
+        [syClient stop];
+    }
+    if (pixels != NULL) {
+        munmap(pixels, MAX_SIZE);
+    }
+
+    if (initialized) {
+        glDeleteTextures(1, &tex);
+        glDeleteFramebuffers(1, &fbo);
+        glDeleteBuffers(NUM_PBOS, pbos);
+    }
+
+}
+
 -(id)initWithServer:(NSDictionary *)serverDescription context:(NSOpenGLContext *)context andDispatcher:(SyphonDispatcher *)d {
     id instance = [super init];
     if (instance == nil) {
@@ -288,7 +304,7 @@ SyphonDispatcher *dispatcher;
         return nil;
     }
 
-    uint8_t *pixels = mmap(NULL, MAX_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    pixels = mmap(NULL, MAX_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
     shm_unlink(uuidStr);
 

@@ -9,6 +9,7 @@ const EventEmitter = require('events');
 const MAX_WIDTH = 2048;
 const MAX_FILENAME = 24; // srsly osx
 const MAX_SIZE = MAX_WIDTH * MAX_WIDTH * 4;
+const CLIENT_TIMEOUT = 2000;
 
 function filenameForServer(server) {
     const parts = server.uuid.split('.');
@@ -17,14 +18,17 @@ function filenameForServer(server) {
     return uuid;
 }
 
-class SyphonClient {
-    constructor(registry, server, frameCallback) {
+class SyphonClient extends EventEmitter {
+    constructor(registry, server) {
+        super();
         this.pending = true;
         this.server = server;
         this.registry = registry;
+        this.lastFrame = null;
+    }
 
-
-        const filename = filenameForServer(server);
+    connectAsync() {
+        const filename = filenameForServer(this.server);
         shm.shm_unlink(filename);
         this.fd = shm.shm_open(filename, shm.O_CREAT | shm.O_RDWR | shm.O_EXCL, 0o600);
         fs.ftruncateSync(this.fd, MAX_SIZE);
@@ -41,15 +45,34 @@ class SyphonClient {
             Buffer.alloc(MAX_SIZE),
         ];
         this.curBuf = 0;
-        this.frameCallback = frameCallback;
-        this.promise = new Promise((resolve, reject) => {
+
+        const promise = new Promise((resolve, reject) => {
             this.onConnected = () => resolve(this);
 
-            registry.send('createClient', {
-                uuid: server.uuid,
+            this.registry.send('createClient', {
+                uuid: this.server.uuid,
             });
         });
+
+        return promise;
     }
+
+    checkAlive() {
+        if (this.lastFrame === null) {
+            return true;
+        }
+        const delta = Date.now() - this.lastFrame;
+        return delta < CLIENT_TIMEOUT;
+    }
+
+    disconnect() {
+        this.cleanup();
+        this.registry.send('disconnectClient', {
+            uuid: this.server.uuid,
+        });
+        this.emit('disconnected');
+    }
+
 
     cleanup() {
         if (this.pending) {
@@ -63,8 +86,9 @@ class SyphonClient {
         const buf = this.copyBufs[this.curBuf];
         this.curBuf = 1 - this.curBuf;
         const size = 4 * width * height;
+        this.lastFrame = Date.now();
         this.shmBuf.copy(buf);
-        this.frameCallback(buf, width, height);
+        this.emit('frame', buf, width, height);
     }
 }
 
@@ -73,11 +97,11 @@ class SyphonRegistry extends EventEmitter {
         super();
         this.serversById = new Map();
         this.clientsByServerId = new Map();
-        this.onExit = this.cleanup.bind(this);
+        this.onExit = () => process.exit();
     }
 
     start() {
-        process.on('exit', this.onExit);
+        process.on('exit', this.cleanup.bind(this));
         process.on('SIGINT', this.onExit);
         process.on('SIGTERM', this.onExit);
         const syphonBufferPath = path.resolve(__dirname, 'native/bin/SyphonBuffer');
@@ -87,17 +111,43 @@ class SyphonRegistry extends EventEmitter {
         });
         this.interface.on('line', this._onLine.bind(this));
         this.ipc.stderr.on('data', data => console.error(data.toString()));
+        setInterval(this.checkAlive.bind(this), CLIENT_TIMEOUT * 2);
+    }
+
+    checkAlive() {
+        for (const client of this.clientsByServerId.values()) {
+            if (!client.checkAlive()) {
+                client.disconnect();
+            }
+        }
     }
 
     onUpdateServers(servers) {
+        const uuids = new Set(servers.map(server => server.uuid));
+
+        const previous = [...this.serversById.keys()];
+        const removed = previous.filter(uuid => !uuids.has(uuid));
+
         this.serversById = new Map(servers.map(server => [server.uuid, server]));
+
+        for (const uuid of removed) {
+            const client = this.clientsByServerId.get(uuid);
+            if (!client) {
+                continue;
+            }
+            client.disconnect();
+        }
+
         this.emit('servers-updated');
     }
 
-    createClientForServerAsync(server, frameCallback) {
-        const client = new SyphonClient(this, server, frameCallback);
+    createClientForServer(server) {
+        const client = new SyphonClient(this, server);
+        client.on('disconnected', () => {
+            this.clientsByServerId.delete(server.uuid);
+        });
         this.clientsByServerId.set(server.uuid, client);
-        return client.promise;
+        return client;
     }
 
     onClientCreated(server) {
@@ -149,6 +199,9 @@ class SyphonRegistry extends EventEmitter {
         for (const client of this.clientsByServerId.values()) {
             client.cleanup();
         }
+
+        this.ipc.kill();
+        process.exit();
     }
 
 }
