@@ -211,10 +211,10 @@ SyphonDispatcher *dispatcher;
     // These coords flip the texture vertically because often you'll want to do that
     GLfloat texCoords[] =
     {
-        0.0, height,
-        width, height,
+        0.0, 0.0,
         width, 0.0,
-        0.0, 0.0
+        width, height,
+        0.0, height,
     };
 
     GLfloat verts[] =
