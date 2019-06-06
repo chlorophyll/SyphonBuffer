@@ -17,19 +17,20 @@ void _logError(NSString *str) {
 
 #define logError(v)
 
-@implementation BufferClient
-SyphonClient* syClient = nil;
-GLuint tex;
-GLuint fbo;
-GLuint pbos[NUM_PBOS];
+@implementation BufferClient {
+    SyphonClient* syClient;
+    GLuint tex;
+    GLuint fbo;
+    GLuint pbos[NUM_PBOS];
 
-uint8_t *pixels = NULL;
+    uint8_t *pixels;
 
-BOOL initialized = NO;
-int currentFrame = 0;
-NSTimeInterval fpsStart;
-NSUInteger fpsCount;
-SyphonDispatcher *dispatcher;
+    BOOL initialized;
+    int currentFrame;
+    NSTimeInterval fpsStart;
+    NSUInteger fpsCount;
+    SyphonDispatcher *dispatcher;
+}
 
 - (void)initBuffersForSize:(NSSize)size {
     if (initialized) {
@@ -124,6 +125,9 @@ SyphonDispatcher *dispatcher;
 }
 
 -(void)copyImage:(SyphonImage *)image toByteBuffer:(uint8_t *)buffer {
+    if (buffer == NULL) {
+        return;
+    }
     GLint prevFBO, prevReadFBO, prevDrawFBO;
 
     // Store previous state
@@ -266,6 +270,7 @@ SyphonDispatcher *dispatcher;
     }
     if (pixels != NULL) {
         munmap(pixels, MAX_SIZE);
+        pixels = NULL;
     }
 
     if (initialized) {
@@ -281,6 +286,7 @@ SyphonDispatcher *dispatcher;
     if (instance == nil) {
         return nil;
     }
+    currentFrame = 0;
 
     dispatcher = d;
 

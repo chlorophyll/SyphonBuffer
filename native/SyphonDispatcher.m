@@ -45,9 +45,10 @@ NSMutableDictionary *clients;
 -(void)disconnectClientForServerUUID:(NSString *)uuid {
     BufferClient *cl = [clients objectForKey:uuid];
     if (cl != nil) {
+        [cl cleanup];
         [clients removeObjectForKey:uuid];
+        [cl release];
     }
-    [cl cleanup];
 }
 
 -(NSDictionary *)jsonForServer:(NSDictionary *)serverDescription {
