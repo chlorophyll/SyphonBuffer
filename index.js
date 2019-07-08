@@ -105,12 +105,18 @@ class SyphonRegistry extends EventEmitter {
         process.on('SIGINT', this.onExit);
         process.on('SIGTERM', this.onExit);
         const syphonBufferPath = path.resolve(__dirname, 'native/bin/SyphonBuffer');
+
         this.ipc = child_process.spawn(syphonBufferPath);
+        this.ipc.stderr.on('data', data => console.error(data.toString()));
+        this.ipc.on('error', err => {
+            this.emit('error', err);
+        });
+
         this.interface = readline.createInterface({
             input: this.ipc.stdout,
         });
         this.interface.on('line', this._onLine.bind(this));
-        this.ipc.stderr.on('data', data => console.error(data.toString()));
+
         setInterval(this.checkAlive.bind(this), CLIENT_TIMEOUT * 2);
     }
 
