@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SYSTEM=$(uname -s)
-if [[ "$SYSTEM" != "Darwin" ]]; then
+if [ "$SYSTEM" != "Darwin" ]; then
     echo "SyphonBuffer: Platform ($SYSTEM) not supported."
     echo "SyphonBuffer: Skipping build."
     exit 0;
