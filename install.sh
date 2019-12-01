@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 SYSTEM=$(uname -s)
 if [ "$SYSTEM" != "Darwin" ]; then
